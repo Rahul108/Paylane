@@ -37,6 +37,9 @@ echo "==> 4. Running Phase 3 End-to-End Payment Flow (MFS + Card)..."
 echo "==> 5. Running Phase 4 & Phase 5 End-to-End Flow (Bindings, UI-less, Saga Journeys & Needs Attention)..."
 (cd "${ROOT_DIR}/scripts/e2e_saga" && KEYS_DIR="${ROOT_DIR}/keys" go run .)
 
+echo "==> 6. Running Phase 6 End-to-End Flow (Timeouts, Refunds & Reconciliation)..."
+(cd "${ROOT_DIR}/scripts/e2e_reconciliation" && KEYS_DIR="${ROOT_DIR}/keys" go run .)
+
 echo "=========================================================="
 echo "          🎉 ALL E2E VERIFICATION CHECKS PASSED!         "
 echo "=========================================================="

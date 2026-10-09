@@ -325,7 +325,36 @@ func (s *PaymentService) ProcessWebhook(ctx context.Context, provider, providerE
 		return fmt.Errorf("failed to record webhook event: %w", err)
 	}
 
-	// 2. Map provider event to state machine transition
+	// 2. Check if payment is already in terminal state EXPIRED
+	p, getErr := s.GetPayment(ctx, targetPaymentID)
+	if getErr == nil && p.Status == model.StatusExpired {
+		if strings.ToUpper(eventType) == "PAYMENT.CAPTURED" || strings.ToUpper(eventType) == "SUCCESS" {
+			// Spec Section 8: "A late success for an EXPIRED payment is not applied; it is recorded as a reconciliation mismatch."
+			mismatchID := model.NewULID()
+			detailsJSON, _ := json.Marshal(map[string]any{
+				"payment_id":         targetPaymentID,
+				"provider":           provider,
+				"provider_event_id":  providerEventID,
+				"provider_reference": providerRef,
+				"webhook_event":      eventType,
+				"amount":             p.Amount,
+				"currency":           p.Currency,
+				"reason":             reason,
+				"note":               "Late success webhook received after payment had already EXPIRED",
+			})
+			reconcileQuery := `
+				INSERT INTO reconciliation_items (id, payment_id, provider, provider_reference, mismatch_type, details, created_at) 
+				VALUES (?, ?, ?, ?, 'LATE_SUCCESS_AFTER_EXPIRED', ?, ?)`
+			_, _ = s.db.ExecContext(ctx, reconcileQuery, mismatchID, targetPaymentID, provider, providerRef, detailsJSON, now)
+
+			// Mark webhook processed
+			updateQuery := `UPDATE webhook_events SET processed_at = ? WHERE id = ?`
+			_, _ = s.db.ExecContext(ctx, updateQuery, now, webhookID)
+			return nil
+		}
+	}
+
+	// 3. Map provider event to state machine transition
 	var targetStatus model.PaymentStatus
 	switch strings.ToUpper(eventType) {
 	case "PAYMENT.CAPTURED", "CHARGE_SUCCESS", "SUCCESS":
@@ -352,7 +381,7 @@ func (s *PaymentService) ProcessWebhook(ctx context.Context, provider, providerE
 		return fmt.Errorf("failed to execute webhook transition: %w", err)
 	}
 
-	// 3. Mark processed
+	// 4. Mark processed
 	updateQuery := `UPDATE webhook_events SET processed_at = ? WHERE id = ?`
 	_, _ = s.db.ExecContext(ctx, updateQuery, now, webhookID)
 
@@ -372,11 +401,21 @@ func (s *PaymentService) RefundPayment(ctx context.Context, paymentID, idempoten
 	now := time.Now().UTC()
 	refundID := model.NewULID()
 
-	if amount <= 0 || amount > p.Amount {
-		amount = p.Amount // default full refund
+	// 1. Calculate previous successful refunds
+	var totalRefunded int64
+	sumQ := `SELECT COALESCE(SUM(amount), 0) FROM refunds WHERE payment_id = ? AND status = 'SUCCEEDED'`
+	_ = s.db.QueryRowContext(ctx, sumQ, paymentID).Scan(&totalRefunded)
+
+	remaining := p.Amount - totalRefunded
+	if remaining <= 0 {
+		return nil, fmt.Errorf("payment %s has already been fully refunded", paymentID)
 	}
 
-	// Call adapter
+	if amount <= 0 || amount > remaining {
+		amount = remaining
+	}
+
+	// 2. Call adapter
 	adp, err := s.adapterRegistry.Get(p.Provider)
 	if err == nil {
 		provRef := ""
@@ -391,7 +430,7 @@ func (s *PaymentService) RefundPayment(ctx context.Context, paymentID, idempoten
 		})
 	}
 
-	// Record in refunds table
+	// 3. Record in refunds table
 	refundQuery := `
 		INSERT INTO refunds (id, payment_id, idempotency_key, amount, currency, status, reason, created_at, updated_at) 
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -400,10 +439,44 @@ func (s *PaymentService) RefundPayment(ctx context.Context, paymentID, idempoten
 		return nil, fmt.Errorf("failed to record refund: %w", err)
 	}
 
-	// Transition payment to REFUNDED (reverses ledger and queues outbox)
-	err = statemachine.Transition(ctx, s.db, paymentID, model.StatusRefunded, reason, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to transition to REFUNDED: %w", err)
+	// 4. Ledger and Outbox
+	if totalRefunded+amount >= p.Amount {
+		// Fully refunded: transition to REFUNDED
+		err = statemachine.Transition(ctx, s.db, paymentID, model.StatusRefunded, reason, &statemachine.TransitionOptions{
+			RefundAmount: &amount,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to transition to REFUNDED: %w", err)
+		}
+	} else {
+		// Partial refund: payment stays CAPTURED, but record reversing ledger entries and outbox event
+		debitID := model.NewULID()
+		creditID := model.NewULID()
+		ledgerQuery := `
+			INSERT INTO ledger_entries (id, payment_id, entry_type, account, amount, currency, reason, created_at) 
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+		creditAccount := fmt.Sprintf("clearing_%s", p.Provider)
+		debitAccount := "merchant_settlement"
+
+		_, _ = s.db.ExecContext(ctx, ledgerQuery, debitID, paymentID, string(model.LedgerDebit), debitAccount, amount, p.Currency, "PARTIAL_REFUND", now)
+		_, _ = s.db.ExecContext(ctx, ledgerQuery, creditID, paymentID, string(model.LedgerCredit), creditAccount, amount, p.Currency, "PARTIAL_REFUND", now)
+
+		// Transactional outbox event
+		outboxPayload, _ := json.Marshal(map[string]any{
+			"event_type": "payment.refunded",
+			"payment_id": paymentID,
+			"refund_id":  refundID,
+			"amount":     amount,
+			"currency":   p.Currency,
+			"status":     "PARTIAL_REFUND",
+			"reason":     reason,
+			"updated_at": now.Format(time.RFC3339Nano),
+		})
+		outboxID := model.NewULID()
+		outboxQuery := `
+			INSERT INTO outbox (id, event_type, aggregate_id, payload, status, retry_count, next_retry_at, created_at, updated_at) 
+			VALUES (?, 'payment.refunded', ?, ?, 'PENDING', 0, ?, ?, ?)`
+		_, _ = s.db.ExecContext(ctx, outboxQuery, outboxID, paymentID, outboxPayload, now, now, now)
 	}
 
 	return &model.Refund{
@@ -417,6 +490,31 @@ func (s *PaymentService) RefundPayment(ctx context.Context, paymentID, idempoten
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}, nil
+}
+
+func (s *PaymentService) GetPaymentRefunds(ctx context.Context, paymentID string) ([]model.Refund, error) {
+	query := `
+		SELECT id, payment_id, idempotency_key, amount, currency, status, reason, created_at, updated_at 
+		FROM refunds 
+		WHERE payment_id = ? 
+		ORDER BY created_at ASC`
+	rows, err := s.db.QueryContext(ctx, query, paymentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var refunds []model.Refund
+	for rows.Next() {
+		var r model.Refund
+		var statusStr string
+		if err := rows.Scan(&r.ID, &r.PaymentID, &r.IdempotencyKey, &r.Amount, &r.Currency, &statusStr, &r.Reason, &r.CreatedAt, &r.UpdatedAt); err != nil {
+			return nil, err
+		}
+		r.Status = model.RefundStatus(statusStr)
+		refunds = append(refunds, r)
+	}
+	return refunds, rows.Err()
 }
 
 func isDuplicateEntryError(err error) bool {

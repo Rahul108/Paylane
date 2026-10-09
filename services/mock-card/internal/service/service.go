@@ -183,6 +183,20 @@ func (s *Service) ConfirmPayment(ctx context.Context, sessionID, cardholder, pan
 		updateQ := `UPDATE card_sessions SET status = 'FAILED', updated_at = ? WHERE id = ?`
 		_, _ = s.db.ExecContext(ctx, updateQ, now, sessionID)
 		return sess.ReturnURL + "?status=abandoned", nil
+	case "RECONCILIATION_MISMATCH", "NO_CALLBACK":
+		updateQ := `UPDATE card_sessions SET status = 'SUCCESS', card_pan_masked = ?, card_brand = ?, updated_at = ? WHERE id = ?`
+		_, _ = s.db.ExecContext(ctx, updateQ, maskedPAN, brand, now, sessionID)
+		delim := "?"
+		if strings.Contains(sess.ReturnURL, "?") {
+			delim = "&"
+		}
+		return fmt.Sprintf("%s%sstatus=success&payment_id=%s", sess.ReturnURL, delim, sess.PaymentID), nil
+	case "AMOUNT_MISMATCH":
+		updateQ := `UPDATE card_sessions SET status = 'SUCCESS', amount = amount + 5000, card_pan_masked = ?, card_brand = ?, updated_at = ? WHERE id = ?`
+		_, _ = s.db.ExecContext(ctx, updateQ, maskedPAN, brand, now, sessionID)
+		finalStatus = "SUCCESS"
+		eventType = "PAYMENT.CAPTURED"
+		reason = "CARD_AUTHORIZED_AND_CAPTURED"
 	}
 
 	// Update session

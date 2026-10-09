@@ -198,6 +198,28 @@ func (h *PaymentHandler) CreateRefund(w http.ResponseWriter, r *http.Request) {
 	h.respond(w, r, http.StatusCreated, ref)
 }
 
+// GetPaymentRefunds handles GET /payments/{id}/refunds
+func (h *PaymentHandler) GetPaymentRefunds(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		if len(parts) >= 2 {
+			id = parts[1]
+		}
+	}
+
+	refunds, err := h.svc.GetPaymentRefunds(r.Context(), id)
+	if err != nil {
+		h.respond(w, r, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	h.respond(w, r, http.StatusOK, map[string]any{
+		"payment_id": id,
+		"refunds":    refunds,
+	})
+}
+
 // HandleWebhook handles POST /webhooks/{provider}
 func (h *PaymentHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	provider := r.PathValue("provider")
