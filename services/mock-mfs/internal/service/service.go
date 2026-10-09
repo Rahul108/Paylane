@@ -156,6 +156,22 @@ func (s *Service) ConfirmPayment(ctx context.Context, sessionID, msisdn, pin, ot
 		updateQ := `UPDATE mfs_sessions SET status = 'FAILED', updated_at = ? WHERE id = ?`
 		_, _ = s.db.ExecContext(ctx, updateQ, now, sessionID)
 		return sess.ReturnURL + "?status=abandoned", nil
+	case "RECONCILIATION_MISMATCH", "NO_CALLBACK":
+		// Provider marks SUCCESS in its DB / settlement report, but never sends callback to core
+		updateQ := `UPDATE mfs_sessions SET status = 'SUCCESS', msisdn = ?, updated_at = ? WHERE id = ?`
+		_, _ = s.db.ExecContext(ctx, updateQ, msisdn, now, sessionID)
+		delim := "?"
+		if strings.Contains(returnURL, "?") {
+			delim = "&"
+		}
+		return fmt.Sprintf("%s%sstatus=success&payment_id=%s", returnURL, delim, sess.PaymentID), nil
+	case "AMOUNT_MISMATCH":
+		// Provider has different amount in settlement report
+		updateQ := `UPDATE mfs_sessions SET status = 'SUCCESS', amount = amount + 5000, msisdn = ?, updated_at = ? WHERE id = ?`
+		_, _ = s.db.ExecContext(ctx, updateQ, msisdn, now, sessionID)
+		finalStatus = "SUCCESS"
+		eventType = "PAYMENT.CAPTURED"
+		reason = "MFS_PIN_OTP_VERIFIED"
 	default:
 		// Normal verification
 		if pin != "1234" {

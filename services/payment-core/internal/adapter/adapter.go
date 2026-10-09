@@ -77,6 +77,15 @@ type UnbindResponse struct {
 	Success bool `json:"success"`
 }
 
+type SettlementRecord struct {
+	SessionID   string `json:"session_id"`
+	PaymentID   string `json:"payment_id"`
+	Amount      int64  `json:"amount"`
+	Currency    string `json:"currency"`
+	Status      string `json:"status"` // SUCCESS
+	CreatedAt   string `json:"created_at"`
+}
+
 type Adapter interface {
 	Name() string
 	CreateSession(ctx context.Context, req CreateSessionRequest) (*CreateSessionResponse, error)
@@ -85,4 +94,5 @@ type Adapter interface {
 	Refund(ctx context.Context, req RefundRequest) (*RefundResponse, error)
 	Bind(ctx context.Context, req BindRequest) (*BindResponse, error)
 	Unbind(ctx context.Context, req UnbindRequest) (*UnbindResponse, error)
+	GetSettlementReport(ctx context.Context) ([]SettlementRecord, error)
 }

@@ -85,6 +85,10 @@ func main() {
 	// Payment service
 	paymentSvc := service.NewPaymentService(db, adapters)
 
+	// Timeout & Reconciliation services
+	timeoutSvc := service.NewTimeoutService(db, adapters, logger)
+	reconcileSvc := service.NewReconciliationService(db, adapters, logger)
+
 	// JWE client for outbox dispatch
 	jweClient := jwe.NewClient(serviceName, signKey, encKey, registry, replay, nil)
 
@@ -99,11 +103,16 @@ func main() {
 	if db != nil {
 		outboxWorker.Start(ctx)
 		defer outboxWorker.Stop()
+
+		// Periodic background timeout sweep: check every 15s for payments stuck > 5m
+		timeoutSvc.Start(ctx, 15*time.Second, 5*time.Minute)
+		defer timeoutSvc.Stop()
 	}
 
 	// Handlers
 	healthHandler := handler.NewHealthHandler(cfg.ServiceName, signKey, registry)
 	paymentHandler := handler.NewPaymentHandler(cfg.ServiceName, signKey, registry, paymentSvc)
+	reconcileHandler := handler.NewReconciliationHandler(cfg.ServiceName, signKey, registry, reconcileSvc, timeoutSvc)
 
 	// Routes
 	mux := http.NewServeMux()
@@ -123,12 +132,19 @@ func main() {
 	mux.Handle("GET /payments/{id}/events", jweAuth(http.HandlerFunc(paymentHandler.GetPaymentEvents)))
 	mux.Handle("GET /payments/{id}/ledger", jweAuth(http.HandlerFunc(paymentHandler.GetPaymentLedger)))
 	mux.Handle("POST /payments/{id}/refunds", jweAuth(http.HandlerFunc(paymentHandler.CreateRefund)))
+	mux.Handle("GET /payments/{id}/refunds", jweAuth(http.HandlerFunc(paymentHandler.GetPaymentRefunds)))
 
 	// Customer Bindings APIs (Secured by JWE)
 	mux.Handle("POST /bindings/initiate", jweAuth(http.HandlerFunc(paymentHandler.InitiateBinding)))
 	mux.Handle("POST /bindings/confirm", jweAuth(http.HandlerFunc(paymentHandler.ConfirmBinding)))
 	mux.Handle("GET /customers/{customer_id}/bindings", jweAuth(http.HandlerFunc(paymentHandler.GetCustomerBindings)))
 	mux.Handle("POST /bindings/{id}/unbind", jweAuth(http.HandlerFunc(paymentHandler.Unbind)))
+
+	// Timeouts & Reconciliation APIs (Secured by JWE)
+	mux.Handle("POST /timeouts/sweep", jweAuth(http.HandlerFunc(reconcileHandler.SweepTimeouts)))
+	mux.Handle("POST /reconciliation/run", jweAuth(http.HandlerFunc(reconcileHandler.RunReconciliation)))
+	mux.Handle("GET /reconciliation/items", jweAuth(http.HandlerFunc(reconcileHandler.GetReconciliationItems)))
+	mux.Handle("POST /reconciliation/items/{id}/resolve", jweAuth(http.HandlerFunc(reconcileHandler.ResolveItem)))
 
 	// Webhooks from PGWs (Accepts JWE authenticated webhooks)
 	mux.Handle("POST /webhooks/{provider}", jweAuth(http.HandlerFunc(paymentHandler.HandleWebhook)))

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -78,10 +79,124 @@ func (m *MFSAdapter) Charge(ctx context.Context, req ChargeRequest) (*ChargeResp
 }
 
 func (m *MFSAdapter) Verify(ctx context.Context, req VerifyRequest) (*VerifyResponse, error) {
+	sessionID := req.ProviderReference
+	if len(sessionID) > 4 && sessionID[:4] == "MFS_" {
+		sessionID = sessionID[4:]
+	}
+
+	if sessionID == "" {
+		return &VerifyResponse{Status: "EXPIRED"}, nil
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/sessions/%s", m.baseURL, sessionID), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := m.httpClient.Do(httpReq)
+	if err != nil {
+		return &VerifyResponse{Status: "PENDING", ProviderReference: req.ProviderReference}, nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return &VerifyResponse{Status: "EXPIRED", ProviderReference: req.ProviderReference}, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return &VerifyResponse{Status: "PENDING", ProviderReference: req.ProviderReference}, nil
+	}
+
+	var sess struct {
+		Status string `json:"status"`
+		Amount int64  `json:"amount"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&sess); err != nil {
+		return nil, err
+	}
+
+	var st string
+	switch sess.Status {
+	case "SUCCESS":
+		st = "CAPTURED"
+	case "FAILED":
+		st = "FAILED"
+	default:
+		st = "PENDING"
+	}
+
 	return &VerifyResponse{
-		Status:            "CAPTURED",
+		Status:            st,
 		ProviderReference: req.ProviderReference,
+		Amount:            sess.Amount,
 	}, nil
+}
+
+func (m *MFSAdapter) GetSettlementReport(ctx context.Context) ([]SettlementRecord, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, m.baseURL+"/settlement", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := m.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var envelope struct {
+		Records []struct {
+			SessionID string `json:"session_id"`
+			PaymentID string `json:"payment_id"`
+			Amount    int64  `json:"amount"`
+			Currency  string `json:"currency"`
+			Status    string `json:"status"`
+			CreatedAt string `json:"created_at"`
+		} `json:"records"`
+	}
+	if err := json.Unmarshal(bodyBytes, &envelope); err == nil && len(envelope.Records) > 0 {
+		var records []SettlementRecord
+		for _, item := range envelope.Records {
+			records = append(records, SettlementRecord{
+				SessionID: item.SessionID,
+				PaymentID: item.PaymentID,
+				Amount:    item.Amount,
+				Currency:  item.Currency,
+				Status:    item.Status,
+				CreatedAt: item.CreatedAt,
+			})
+		}
+		return records, nil
+	}
+
+	var rawItems []struct {
+		SessionID string `json:"session_id"`
+		PaymentID string `json:"payment_id"`
+		Amount    int64  `json:"amount"`
+		Currency  string `json:"currency"`
+		Status    string `json:"status"`
+		CreatedAt string `json:"created_at"`
+	}
+	if err := json.Unmarshal(bodyBytes, &rawItems); err != nil {
+		return nil, err
+	}
+
+	var records []SettlementRecord
+	for _, item := range rawItems {
+		records = append(records, SettlementRecord{
+			SessionID: item.SessionID,
+			PaymentID: item.PaymentID,
+			Amount:    item.Amount,
+			Currency:  item.Currency,
+			Status:    item.Status,
+			CreatedAt: item.CreatedAt,
+		})
+	}
+	return records, nil
 }
 
 func (m *MFSAdapter) Refund(ctx context.Context, req RefundRequest) (*RefundResponse, error) {

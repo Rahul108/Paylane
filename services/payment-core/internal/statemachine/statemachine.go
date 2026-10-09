@@ -27,6 +27,7 @@ var AllowedTransitions = map[model.PaymentStatus][]model.PaymentStatus{
 		model.StatusAuthorized,
 		model.StatusCaptured, // 1-step capture
 		model.StatusFailed,
+		model.StatusExpired,
 	},
 	model.StatusAuthorized: {
 		model.StatusCaptured,
@@ -57,6 +58,7 @@ func IsValidTransition(from, to model.PaymentStatus) bool {
 type TransitionOptions struct {
 	ProviderReference *string
 	FailureReason     *string
+	RefundAmount      *int64
 	CustomMetadata    map[string]any
 }
 
@@ -177,13 +179,18 @@ func TransitionTx(ctx context.Context, tx *sql.Tx, paymentID string, to model.Pa
 			INSERT INTO ledger_entries (id, payment_id, entry_type, account, amount, currency, reason, created_at) 
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
 		
+		refundAmt := amount
+		if opts != nil && opts.RefundAmount != nil && *opts.RefundAmount > 0 {
+			refundAmt = *opts.RefundAmount
+		}
+
 		creditAccount := fmt.Sprintf("clearing_%s", provider)
 		debitAccount := "merchant_settlement"
 
-		if _, err := tx.ExecContext(ctx, ledgerQuery, debitID, paymentID, string(model.LedgerDebit), debitAccount, amount, currency, "PAYMENT_REFUND", now); err != nil {
+		if _, err := tx.ExecContext(ctx, ledgerQuery, debitID, paymentID, string(model.LedgerDebit), debitAccount, refundAmt, currency, "PAYMENT_REFUND", now); err != nil {
 			return fmt.Errorf("failed to write refund debit ledger entry: %w", err)
 		}
-		if _, err := tx.ExecContext(ctx, ledgerQuery, creditID, paymentID, string(model.LedgerCredit), creditAccount, amount, currency, "PAYMENT_REFUND", now); err != nil {
+		if _, err := tx.ExecContext(ctx, ledgerQuery, creditID, paymentID, string(model.LedgerCredit), creditAccount, refundAmt, currency, "PAYMENT_REFUND", now); err != nil {
 			return fmt.Errorf("failed to write refund credit ledger entry: %w", err)
 		}
 	}
