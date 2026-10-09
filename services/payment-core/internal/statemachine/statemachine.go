@@ -191,6 +191,7 @@ func TransitionTx(ctx context.Context, tx *sql.Tx, paymentID string, to model.Pa
 	// 7. Append Transactional Outbox Event
 	outboxEventType := fmt.Sprintf("payment.%s", strings.ToLower(string(to)))
 	outboxPayload, err := json.Marshal(map[string]any{
+		"event_type":         outboxEventType,
 		"payment_id":         paymentID,
 		"customer_id":        customerID,
 		"amount":             amount,

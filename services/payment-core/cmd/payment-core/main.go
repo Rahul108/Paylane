@@ -124,6 +124,12 @@ func main() {
 	mux.Handle("GET /payments/{id}/ledger", jweAuth(http.HandlerFunc(paymentHandler.GetPaymentLedger)))
 	mux.Handle("POST /payments/{id}/refunds", jweAuth(http.HandlerFunc(paymentHandler.CreateRefund)))
 
+	// Customer Bindings APIs (Secured by JWE)
+	mux.Handle("POST /bindings/initiate", jweAuth(http.HandlerFunc(paymentHandler.InitiateBinding)))
+	mux.Handle("POST /bindings/confirm", jweAuth(http.HandlerFunc(paymentHandler.ConfirmBinding)))
+	mux.Handle("GET /customers/{customer_id}/bindings", jweAuth(http.HandlerFunc(paymentHandler.GetCustomerBindings)))
+	mux.Handle("POST /bindings/{id}/unbind", jweAuth(http.HandlerFunc(paymentHandler.Unbind)))
+
 	// Webhooks from PGWs (Accepts JWE authenticated webhooks)
 	mux.Handle("POST /webhooks/{provider}", jweAuth(http.HandlerFunc(paymentHandler.HandleWebhook)))
 

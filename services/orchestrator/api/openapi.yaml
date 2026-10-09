@@ -2,7 +2,7 @@ openapi: 3.0.3
 info:
   title: orchestrator API
   version: 1.0.0
-  description: Workflow orchestration service executing payment journeys and downstream steps.
+  description: Workflow orchestration service executing payment journeys, sagas, step tracking, and downstream retries.
 servers:
   - url: http://orchestrator:4010
 paths:
@@ -24,20 +24,53 @@ paths:
           description: Missing or invalid JWE token
   /journeys:
     post:
-      summary: Start a new customer journey
+      summary: Start a new customer journey saga
       security:
         - JWEAuth: []
       responses:
         '201':
-          description: Journey created
+          description: Journey created and initiated
   /journeys/{id}:
     get:
       summary: Query journey and step progress
       security:
         - JWEAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         '200':
-          description: Journey status
+          description: Journey status and step details
+  /events:
+    post:
+      summary: Receive transactional outbox events from payment-core
+      security:
+        - JWEAuth: []
+      responses:
+        '200':
+          description: Event consumed and saga advanced
+  /journeys/{id}/steps/{step}/retry:
+    post:
+      summary: Manually retry a failed or NEEDS_ATTENTION step
+      security:
+        - JWEAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: step
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Step execution re-triggered
 components:
   securitySchemes:
     JWEAuth:
