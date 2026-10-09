@@ -4,14 +4,14 @@ services:
     container_name: paylane-mysql
     restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: rootsecret
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootsecret}
     ports:
-      - "127.0.0.1:3306:3306"
+      - "127.0.0.1:${MYSQL_PORT:-3306}:3306"
     volumes:
       - ./deploy/mysql-init:/docker-entrypoint-initdb.d:ro
       - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootsecret"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-rootsecret}"]
       interval: 3s
       timeout: 3s
       retries: 15
@@ -23,7 +23,7 @@ services:
     container_name: paylane-redis
     restart: always
     ports:
-      - "127.0.0.1:6381:6379"
+      - "127.0.0.1:${REDIS_PORT:-6381}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 3s
@@ -40,10 +40,10 @@ services:
     restart: always
     environment:
       PORT: "4011"
-      KEYS_DIR: "/keys"
-      DATABASE_URL: "payment_core_user:payment_core_pass@tcp(mysql:3306)/paylane_payment_core?parseTime=true&loc=UTC&charset=utf8mb4"
+      KEYS_DIR: "${KEYS_DIR:-/keys}"
+      DATABASE_URL: "${PAYMENT_CORE_DB_URL:-payment_core_user:payment_core_pass@tcp(mysql:3306)/paylane_payment_core?parseTime=true&loc=UTC&charset=utf8mb4}"
     ports:
-      - "127.0.0.1:4011:4011"
+      - "127.0.0.1:${PAYMENT_CORE_PORT:-4011}:4011"
     volumes:
       - ./keys:/keys:ro
     depends_on:
@@ -67,10 +67,10 @@ services:
     restart: always
     environment:
       PORT: "4010"
-      KEYS_DIR: "/keys"
-      DATABASE_URL: "orchestrator_user:orchestrator_pass@tcp(mysql:3306)/paylane_orchestrator?parseTime=true&loc=UTC&charset=utf8mb4"
+      KEYS_DIR: "${KEYS_DIR:-/keys}"
+      DATABASE_URL: "${ORCHESTRATOR_DB_URL:-orchestrator_user:orchestrator_pass@tcp(mysql:3306)/paylane_orchestrator?parseTime=true&loc=UTC&charset=utf8mb4}"
     ports:
-      - "127.0.0.1:4010:4010"
+      - "127.0.0.1:${ORCHESTRATOR_PORT:-4010}:4010"
     volumes:
       - ./keys:/keys:ro
     depends_on:
@@ -92,10 +92,10 @@ services:
     restart: always
     environment:
       PORT: "5011"
-      KEYS_DIR: "/keys"
-      DATABASE_URL: "mock_mfs_user:mock_mfs_pass@tcp(mysql:3306)/paylane_mock_mfs?parseTime=true&loc=UTC&charset=utf8mb4"
+      KEYS_DIR: "${KEYS_DIR:-/keys}"
+      DATABASE_URL: "${MOCK_MFS_DB_URL:-mock_mfs_user:mock_mfs_pass@tcp(mysql:3306)/paylane_mock_mfs?parseTime=true&loc=UTC&charset=utf8mb4}"
     ports:
-      - "127.0.0.1:5011:5011"
+      - "127.0.0.1:${MOCK_MFS_PORT:-5011}:5011"
     volumes:
       - ./keys:/keys:ro
     depends_on:
@@ -117,10 +117,10 @@ services:
     restart: always
     environment:
       PORT: "5012"
-      KEYS_DIR: "/keys"
-      DATABASE_URL: "mock_card_user:mock_card_pass@tcp(mysql:3306)/paylane_mock_card?parseTime=true&loc=UTC&charset=utf8mb4"
+      KEYS_DIR: "${KEYS_DIR:-/keys}"
+      DATABASE_URL: "${MOCK_CARD_DB_URL:-mock_card_user:mock_card_pass@tcp(mysql:3306)/paylane_mock_card?parseTime=true&loc=UTC&charset=utf8mb4}"
     ports:
-      - "127.0.0.1:5012:5012"
+      - "127.0.0.1:${MOCK_CARD_PORT:-5012}:5012"
     volumes:
       - ./keys:/keys:ro
     depends_on:
@@ -142,10 +142,10 @@ services:
     restart: always
     environment:
       PORT: "5013"
-      KEYS_DIR: "/keys"
-      DATABASE_URL: "mock_downstream_user:mock_downstream_pass@tcp(mysql:3306)/paylane_mock_downstream?parseTime=true&loc=UTC&charset=utf8mb4"
+      KEYS_DIR: "${KEYS_DIR:-/keys}"
+      DATABASE_URL: "${MOCK_DOWNSTREAM_DB_URL:-mock_downstream_user:mock_downstream_pass@tcp(mysql:3306)/paylane_mock_downstream?parseTime=true&loc=UTC&charset=utf8mb4}"
     ports:
-      - "127.0.0.1:5013:5013"
+      - "127.0.0.1:${MOCK_DOWNSTREAM_PORT:-5013}:5013"
     volumes:
       - ./keys:/keys:ro
     depends_on:
@@ -168,10 +168,10 @@ services:
     environment:
       PORT: "3010"
       HOSTNAME: "0.0.0.0"
-      KEYS_DIR: "/keys"
-      ORCHESTRATOR_URL: "http://orchestrator:4010"
+      KEYS_DIR: "${KEYS_DIR:-/keys}"
+      ORCHESTRATOR_URL: "${ORCHESTRATOR_URL:-http://orchestrator:4010}"
     ports:
-      - "127.0.0.1:3010:3010"
+      - "127.0.0.1:${WEB_PORT:-3010}:3010"
     volumes:
       - ./keys:/keys:ro
     depends_on:

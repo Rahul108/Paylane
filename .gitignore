@@ -4,10 +4,13 @@ keys/
 # Independent microservice repositories (each has its own git repo)
 services/
 
-# Environment files
+# Environment files (never commit actual .env)
 .env
 .env.*
 !.env.example
+deploy/.env
+deploy/.env.*
+!deploy/.env.example
 
 # Build artifacts and binaries
 bin/
