@@ -1,0 +1,17 @@
+# JWE private dev keys
+keys/*/*_private.pem
+
+# Environment files
+.env
+.env.local
+
+# Build artifacts and binaries
+bin/
+dist/
+node_modules/
+.next/
+
+# IDE & OS
+.DS_Store
+.idea/
+.vscode/

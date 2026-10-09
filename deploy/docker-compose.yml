@@ -1,0 +1,193 @@
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: paylane-mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: rootsecret
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./deploy/mysql-init:/docker-entrypoint-initdb.d:ro
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootsecret"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+    networks:
+      - paylane-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: paylane-redis
+    restart: always
+    ports:
+      - "6381:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    networks:
+      - paylane-net
+
+  payment-core:
+    build:
+      context: .
+      dockerfile: services/payment-core/Dockerfile
+    container_name: paylane-payment-core
+    restart: always
+    environment:
+      PORT: "4011"
+      KEYS_DIR: "/keys"
+      DATABASE_URL: "payment_core_user:payment_core_pass@tcp(mysql:3306)/paylane_payment_core?parseTime=true&loc=UTC&charset=utf8mb4"
+    ports:
+      - "4011:4011"
+    volumes:
+      - ./keys:/keys:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4011/livez"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - paylane-net
+
+  orchestrator:
+    build:
+      context: .
+      dockerfile: services/orchestrator/Dockerfile
+    container_name: paylane-orchestrator
+    restart: always
+    environment:
+      PORT: "4010"
+      KEYS_DIR: "/keys"
+      DATABASE_URL: "orchestrator_user:orchestrator_pass@tcp(mysql:3306)/paylane_orchestrator?parseTime=true&loc=UTC&charset=utf8mb4"
+    ports:
+      - "4010:4010"
+    volumes:
+      - ./keys:/keys:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4010/livez"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - paylane-net
+
+  mock-mfs:
+    build:
+      context: .
+      dockerfile: services/mock-mfs/Dockerfile
+    container_name: paylane-mock-mfs
+    restart: always
+    environment:
+      PORT: "5011"
+      KEYS_DIR: "/keys"
+      DATABASE_URL: "mock_mfs_user:mock_mfs_pass@tcp(mysql:3306)/paylane_mock_mfs?parseTime=true&loc=UTC&charset=utf8mb4"
+    ports:
+      - "5011:5011"
+    volumes:
+      - ./keys:/keys:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:5011/livez"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - paylane-net
+
+  mock-card:
+    build:
+      context: .
+      dockerfile: services/mock-card/Dockerfile
+    container_name: paylane-mock-card
+    restart: always
+    environment:
+      PORT: "5012"
+      KEYS_DIR: "/keys"
+      DATABASE_URL: "mock_card_user:mock_card_pass@tcp(mysql:3306)/paylane_mock_card?parseTime=true&loc=UTC&charset=utf8mb4"
+    ports:
+      - "5012:5012"
+    volumes:
+      - ./keys:/keys:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:5012/livez"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - paylane-net
+
+  mock-downstream:
+    build:
+      context: .
+      dockerfile: services/mock-downstream/Dockerfile
+    container_name: paylane-mock-downstream
+    restart: always
+    environment:
+      PORT: "5013"
+      KEYS_DIR: "/keys"
+      DATABASE_URL: "mock_downstream_user:mock_downstream_pass@tcp(mysql:3306)/paylane_mock_downstream?parseTime=true&loc=UTC&charset=utf8mb4"
+    ports:
+      - "5013:5013"
+    volumes:
+      - ./keys:/keys:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:5013/livez"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - paylane-net
+
+  web:
+    build:
+      context: .
+      dockerfile: services/web/Dockerfile
+    container_name: paylane-web
+    restart: always
+    environment:
+      PORT: "3010"
+      KEYS_DIR: "/keys"
+      ORCHESTRATOR_URL: "http://orchestrator:4010"
+    ports:
+      - "3010:3010"
+    volumes:
+      - ./keys:/keys:ro
+    depends_on:
+      orchestrator:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3010/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - paylane-net
+
+volumes:
+  mysql_data:
+
+networks:
+  paylane-net:
+    driver: bridge
