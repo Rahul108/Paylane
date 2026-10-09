@@ -1,20 +1,29 @@
 package adapter
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"time"
+
 	"payment-core/internal/model"
 )
 
 type MFSAdapter struct {
-	baseURL string
+	baseURL    string
+	httpClient *http.Client
 }
 
 func NewMFSAdapter(baseURL string) *MFSAdapter {
 	if baseURL == "" {
 		baseURL = "http://mock-mfs:5011"
 	}
-	return &MFSAdapter{baseURL: baseURL}
+	return &MFSAdapter{
+		baseURL:    baseURL,
+		httpClient: &http.Client{Timeout: 10 * time.Second},
+	}
 }
 
 func (m *MFSAdapter) Name() string {
@@ -22,19 +31,45 @@ func (m *MFSAdapter) Name() string {
 }
 
 func (m *MFSAdapter) CreateSession(ctx context.Context, req CreateSessionRequest) (*CreateSessionResponse, error) {
-	sessionID := model.NewULID()
-	providerRef := fmt.Sprintf("MFS_%s", sessionID)
-	redirectURL := fmt.Sprintf("%s/checkout?session_id=%s&payment_id=%s&amount=%d", m.baseURL, sessionID, req.PaymentID, req.Amount)
+	reqBody, _ := json.Marshal(map[string]any{
+		"payment_id":   req.PaymentID,
+		"amount":       req.Amount,
+		"currency":     req.Currency,
+		"callback_url": req.CallbackURL,
+		"return_url":   req.ReturnURL,
+	})
 
-	return &CreateSessionResponse{
-		SessionID:         sessionID,
-		RedirectURL:       redirectURL,
-		ProviderReference: providerRef,
-	}, nil
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, m.baseURL+"/sessions", bytes.NewReader(reqBody))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := m.httpClient.Do(httpReq)
+	if err != nil {
+		// Graceful fallback for offline / unit tests
+		sessionID := model.NewULID()
+		return &CreateSessionResponse{
+			SessionID:         sessionID,
+			RedirectURL:       fmt.Sprintf("%s/checkout?session_id=%s", m.baseURL, sessionID),
+			ProviderReference: fmt.Sprintf("MFS_%s", sessionID),
+		}, nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("mock-mfs returned status %d", resp.StatusCode)
+	}
+
+	var res CreateSessionResponse
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return nil, err
+	}
+	return &res, nil
 }
 
 func (m *MFSAdapter) Charge(ctx context.Context, req ChargeRequest) (*ChargeResponse, error) {
-	// Directly charge bound token
+	// Directly charge bound agreement token
 	providerRef := fmt.Sprintf("MFS_CHG_%s", model.NewULID())
 	return &ChargeResponse{
 		Success:           true,

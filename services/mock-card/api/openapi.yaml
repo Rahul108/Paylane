@@ -2,7 +2,7 @@ openapi: 3.0.3
 info:
   title: mock-card API
   version: 1.0.0
-  description: Mock Card payment gateway simulator with 3DS OTP and tokenization.
+  description: Mock Card payment gateway with 3DS OTP hosted page, tokenize/charge, and webhooks.
 servers:
   - url: http://mock-card:5012
 paths:
@@ -22,6 +22,48 @@ paths:
           description: JWE-encrypted healthy response
         '401':
           description: Unauthorized
+  /sessions:
+    post:
+      summary: Create card checkout session
+      responses:
+        '201':
+          description: Session created with hosted checkout redirect URL
+  /sessions/{id}:
+    get:
+      summary: Get session status
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Session details
+  /checkout:
+    get:
+      summary: Hosted Card & 3DS OTP Checkout page
+      parameters:
+        - name: session_id
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: HTML card entry page
+  /checkout/confirm:
+    post:
+      summary: Submit PAN, CVV, OTP and trigger webhook
+      responses:
+        '303':
+          description: Redirects to return URL
+  /settlement:
+    get:
+      summary: Fetch card settlement report
+      responses:
+        '200':
+          description: JSON settlement report
 components:
   securitySchemes:
     JWEAuth:

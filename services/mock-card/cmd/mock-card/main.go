@@ -14,6 +14,7 @@ import (
 
 	"mock-card/internal/config"
 	"mock-card/internal/handler"
+	"mock-card/internal/service"
 	"paylane-jwe"
 )
 
@@ -44,8 +45,10 @@ func main() {
 	registry := jwe.NewKeyRegistry(cfg.KeysDir)
 	replay := jwe.NewMemoryReplayProtector()
 
+	var db *sql.DB
 	if cfg.DatabaseURL != "" {
-		db, err := waitForDB(cfg.DatabaseURL, 30*time.Second, logger)
+		var err error
+		db, err = waitForDB(cfg.DatabaseURL, 30*time.Second, logger)
 		if err != nil {
 			logger.Error("failed to connect to database", "err", err)
 			os.Exit(1)
@@ -58,13 +61,35 @@ func main() {
 		}
 	}
 
+	jweClient := jwe.NewClient(serviceName, signKey, encKey, registry, replay, nil)
+
+	baseURL := os.Getenv("BASE_URL")
+	if baseURL == "" {
+		baseURL = fmt.Sprintf("http://localhost:%s", cfg.Port)
+	}
+	cardService := service.NewService(db, jweClient, baseURL, logger)
+
 	mux := http.NewServeMux()
 	healthHandler := handler.NewHealthHandler(cfg.ServiceName, signKey, registry)
+	cardHandler := handler.NewCardHandler(cardService)
 
+	// Liveness
 	mux.HandleFunc("GET /livez", healthHandler.Livez)
 
+	// JWE Auth
 	jweAuth := jwe.Middleware(cfg.ServiceName, encKey, registry, replay)
 	mux.Handle("POST /health", jweAuth(http.HandlerFunc(healthHandler.Health)))
+
+	// API sessions (accepts direct calls and JWE calls)
+	mux.HandleFunc("POST /sessions", cardHandler.CreateSession)
+	mux.HandleFunc("GET /sessions/{id}", cardHandler.GetSession)
+
+	// Hosted Pages (browser access)
+	mux.HandleFunc("GET /checkout", cardHandler.RenderCheckout)
+	mux.HandleFunc("POST /checkout/confirm", cardHandler.ConfirmCheckout)
+
+	// Settlement report
+	mux.HandleFunc("GET /settlement", cardHandler.GetSettlement)
 
 	addr := fmt.Sprintf(":%s", cfg.Port)
 	server := &http.Server{
