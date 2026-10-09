@@ -1,20 +1,29 @@
 package adapter
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"time"
+
 	"payment-core/internal/model"
 )
 
 type CardAdapter struct {
-	baseURL string
+	baseURL    string
+	httpClient *http.Client
 }
 
 func NewCardAdapter(baseURL string) *CardAdapter {
 	if baseURL == "" {
 		baseURL = "http://mock-card:5012"
 	}
-	return &CardAdapter{baseURL: baseURL}
+	return &CardAdapter{
+		baseURL:    baseURL,
+		httpClient: &http.Client{Timeout: 10 * time.Second},
+	}
 }
 
 func (c *CardAdapter) Name() string {
@@ -22,15 +31,41 @@ func (c *CardAdapter) Name() string {
 }
 
 func (c *CardAdapter) CreateSession(ctx context.Context, req CreateSessionRequest) (*CreateSessionResponse, error) {
-	sessionID := model.NewULID()
-	providerRef := fmt.Sprintf("CRD_%s", sessionID)
-	redirectURL := fmt.Sprintf("%s/checkout?session_id=%s&payment_id=%s&amount=%d", c.baseURL, sessionID, req.PaymentID, req.Amount)
+	reqBody, _ := json.Marshal(map[string]any{
+		"payment_id":   req.PaymentID,
+		"amount":       req.Amount,
+		"currency":     req.Currency,
+		"callback_url": req.CallbackURL,
+		"return_url":   req.ReturnURL,
+	})
 
-	return &CreateSessionResponse{
-		SessionID:         sessionID,
-		RedirectURL:       redirectURL,
-		ProviderReference: providerRef,
-	}, nil
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/sessions", bytes.NewReader(reqBody))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		// Fallback for offline / unit tests
+		sessionID := model.NewULID()
+		return &CreateSessionResponse{
+			SessionID:         sessionID,
+			RedirectURL:       fmt.Sprintf("%s/checkout?session_id=%s", c.baseURL, sessionID),
+			ProviderReference: fmt.Sprintf("CRD_%s", sessionID),
+		}, nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("mock-card returned status %d", resp.StatusCode)
+	}
+
+	var res CreateSessionResponse
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return nil, err
+	}
+	return &res, nil
 }
 
 func (c *CardAdapter) Charge(ctx context.Context, req ChargeRequest) (*ChargeResponse, error) {

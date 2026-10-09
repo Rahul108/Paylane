@@ -2,7 +2,7 @@ openapi: 3.0.3
 info:
   title: mock-mfs API
   version: 1.0.0
-  description: Mock Mobile Financial Services payment gateway (bKash-like).
+  description: Mock Mobile Financial Services payment gateway with hosted PIN/OTP pages and webhooks.
 servers:
   - url: http://mock-mfs:5011
 paths:
@@ -22,6 +22,48 @@ paths:
           description: JWE-encrypted healthy response
         '401':
           description: Unauthorized
+  /sessions:
+    post:
+      summary: Create checkout session
+      responses:
+        '201':
+          description: Session created with hosted checkout redirect URL
+  /sessions/{id}:
+    get:
+      summary: Get session status
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Session details
+  /checkout:
+    get:
+      summary: Hosted MFS PIN & OTP Checkout page
+      parameters:
+        - name: session_id
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: HTML checkout page
+  /checkout/confirm:
+    post:
+      summary: Submit wallet number, PIN, OTP and trigger webhook
+      responses:
+        '303':
+          description: Redirects to return URL
+  /settlement:
+    get:
+      summary: Fetch provider settlement report
+      responses:
+        '200':
+          description: JSON settlement report
 components:
   securitySchemes:
     JWEAuth:

@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 echo "=========================================================="
-echo "           PAYLANE PHASE 1 VERIFICATION & E2E              "
+echo "           PAYLANE COMPREHENSIVE E2E VERIFICATION         "
 echo "=========================================================="
 
 echo "==> 1. Checking unauthenticated liveness endpoints..."
@@ -31,6 +31,9 @@ done
 echo "==> 3. Running JWE service mesh handshake test..."
 (cd "${ROOT_DIR}/scripts/meshcheck" && KEYS_DIR="${ROOT_DIR}/keys" go run .)
 
+echo "==> 4. Running Phase 3 End-to-End Payment Flow (MFS + Card)..."
+(cd "${ROOT_DIR}/scripts/e2e_payment" && KEYS_DIR="${ROOT_DIR}/keys" go run .)
+
 echo "=========================================================="
-echo "       🎉 ALL CHECKS PASSED FOR PHASE 1 FOUNDATION!       "
+echo "          🎉 ALL E2E VERIFICATION CHECKS PASSED!         "
 echo "=========================================================="
