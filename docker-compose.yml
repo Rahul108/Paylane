@@ -168,6 +168,7 @@ services:
     restart: always
     environment:
       PORT: "3010"
+      HOSTNAME: "0.0.0.0"
       KEYS_DIR: "/keys"
       ORCHESTRATOR_URL: "http://orchestrator:4010"
     ports:
@@ -178,7 +179,7 @@ services:
       orchestrator:
         condition: service_started
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3010/api/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3010/api/health"]
       interval: 5s
       timeout: 3s
       retries: 10
