@@ -1,0 +1,30 @@
+openapi: 3.0.3
+info:
+  title: mock-downstream API
+  version: 1.0.0
+  description: Mock downstream domain services (telecom recharge, cashback, offer subscriptions).
+servers:
+  - url: http://mock-downstream:5013
+paths:
+  /livez:
+    get:
+      summary: Liveness health check
+      responses:
+        '200':
+          description: OK
+  /health:
+    post:
+      summary: JWE-authenticated health check
+      security:
+        - JWEAuth: []
+      responses:
+        '200':
+          description: JWE-encrypted healthy response
+        '401':
+          description: Unauthorized
+components:
+  securitySchemes:
+    JWEAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWE

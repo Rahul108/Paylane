@@ -1,0 +1,116 @@
+openapi: 3.0.3
+info:
+  title: payment-core API
+  version: 1.0.0
+  description: Core payment engine for Paylane handling payment state machine, double-entry ledger, provider adapters, webhooks, and outbox.
+servers:
+  - url: http://payment-core:4011
+paths:
+  /livez:
+    get:
+      summary: Liveness health check (unsigned)
+      responses:
+        '200':
+          description: OK
+  /health:
+    post:
+      summary: JWE-authenticated service mesh health check
+      security:
+        - JWEAuth: []
+      responses:
+        '200':
+          description: JWE-encrypted healthy response
+        '401':
+          description: Missing or invalid JWE token
+  /payments:
+    post:
+      summary: Initiate payment session (idempotent)
+      security:
+        - JWEAuth: []
+      responses:
+        '201':
+          description: Payment session created or existing returned
+        '400':
+          description: Invalid request parameters
+        '401':
+          description: Unauthorized JWE
+  /payments/{id}:
+    get:
+      summary: Retrieve payment by ULID
+      security:
+        - JWEAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Payment details
+        '404':
+          description: Payment not found
+  /payments/{id}/events:
+    get:
+      summary: Retrieve audit trail of payment state transitions
+      security:
+        - JWEAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of state transitions
+  /payments/{id}/ledger:
+    get:
+      summary: Retrieve double-entry ledger entries for payment
+      security:
+        - JWEAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of debit/credit ledger records
+  /payments/{id}/refunds:
+    post:
+      summary: Issue full or partial refund for a CAPTURED payment
+      security:
+        - JWEAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '201':
+          description: Refund processed and ledger reversed
+        '400':
+          description: Cannot refund payment
+  /webhooks/{provider}:
+    post:
+      summary: Receive signed webhook notification from payment gateway
+      security:
+        - JWEAuth: []
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Webhook processed or deduplicated
+components:
+  securitySchemes:
+    JWEAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWE

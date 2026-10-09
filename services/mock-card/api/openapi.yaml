@@ -1,0 +1,30 @@
+openapi: 3.0.3
+info:
+  title: mock-card API
+  version: 1.0.0
+  description: Mock Card payment gateway simulator with 3DS OTP and tokenization.
+servers:
+  - url: http://mock-card:5012
+paths:
+  /livez:
+    get:
+      summary: Liveness health check
+      responses:
+        '200':
+          description: OK
+  /health:
+    post:
+      summary: JWE-authenticated health check
+      security:
+        - JWEAuth: []
+      responses:
+        '200':
+          description: JWE-encrypted healthy response
+        '401':
+          description: Unauthorized
+components:
+  securitySchemes:
+    JWEAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWE
