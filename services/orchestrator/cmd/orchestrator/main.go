@@ -14,6 +14,7 @@ import (
 
 	"orchestrator/internal/config"
 	"orchestrator/internal/handler"
+	"orchestrator/internal/service"
 	"paylane-jwe"
 )
 
@@ -44,8 +45,10 @@ func main() {
 	registry := jwe.NewKeyRegistry(cfg.KeysDir)
 	replay := jwe.NewMemoryReplayProtector()
 
+	var db *sql.DB
 	if cfg.DatabaseURL != "" {
-		db, err := waitForDB(cfg.DatabaseURL, 30*time.Second, logger)
+		var err error
+		db, err = waitForDB(cfg.DatabaseURL, 30*time.Second, logger)
 		if err != nil {
 			logger.Error("failed to connect to database", "err", err)
 			os.Exit(1)
@@ -58,13 +61,36 @@ func main() {
 		}
 	}
 
+	jweClient := jwe.NewClient(serviceName, signKey, encKey, registry, replay, nil)
+
+	paymentCoreURL := os.Getenv("PAYMENT_CORE_URL")
+	if paymentCoreURL == "" {
+		paymentCoreURL = "http://payment-core:4011"
+	}
+
+	downstreamURL := os.Getenv("DOWNSTREAM_URL")
+	if downstreamURL == "" {
+		downstreamURL = "http://mock-downstream:5013"
+	}
+
+	orchService := service.NewService(db, jweClient, paymentCoreURL, downstreamURL, logger)
+
 	mux := http.NewServeMux()
 	healthHandler := handler.NewHealthHandler(cfg.ServiceName, signKey, registry)
+	journeyHandler := handler.NewJourneyHandler(cfg.ServiceName, signKey, registry, orchService)
 
+	// Liveness
 	mux.HandleFunc("GET /livez", healthHandler.Livez)
 
+	// JWE Auth middleware
 	jweAuth := jwe.Middleware(cfg.ServiceName, encKey, registry, replay)
 	mux.Handle("POST /health", jweAuth(http.HandlerFunc(healthHandler.Health)))
+
+	// Journey Lifecycle APIs
+	mux.Handle("POST /journeys", jweAuth(http.HandlerFunc(journeyHandler.StartJourney)))
+	mux.Handle("GET /journeys/{id}", jweAuth(http.HandlerFunc(journeyHandler.GetJourney)))
+	mux.Handle("POST /events", jweAuth(http.HandlerFunc(journeyHandler.HandleEvent)))
+	mux.Handle("POST /journeys/{id}/steps/{step}/retry", jweAuth(http.HandlerFunc(journeyHandler.RetryStep)))
 
 	addr := fmt.Sprintf(":%s", cfg.Port)
 	server := &http.Server{

@@ -3,6 +3,7 @@ package outbox
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -95,7 +96,12 @@ func (w *Worker) dispatch(ctx context.Context, id, eventType, aggregateID string
 	// If a subscriber URL and JWE client is configured, dispatch over JWE
 	var dispatchErr error
 	if w.subscriberURL != "" && w.jweClient != nil {
-		_, _, dispatchErr = w.jweClient.Post(ctx, "orchestrator", w.subscriberURL, payload, nil)
+		code, respBytes, err := w.jweClient.Post(ctx, "orchestrator", w.subscriberURL, payload, nil)
+		if err != nil {
+			dispatchErr = err
+		} else if code >= 400 {
+			dispatchErr = fmt.Errorf("subscriber returned HTTP %d: %s", code, string(respBytes))
+		}
 	}
 
 	if dispatchErr == nil {

@@ -14,6 +14,7 @@ import (
 
 	"mock-downstream/internal/config"
 	"mock-downstream/internal/handler"
+	"mock-downstream/internal/service"
 	"paylane-jwe"
 )
 
@@ -44,8 +45,10 @@ func main() {
 	registry := jwe.NewKeyRegistry(cfg.KeysDir)
 	replay := jwe.NewMemoryReplayProtector()
 
+	var db *sql.DB
 	if cfg.DatabaseURL != "" {
-		db, err := waitForDB(cfg.DatabaseURL, 30*time.Second, logger)
+		var err error
+		db, err = waitForDB(cfg.DatabaseURL, 30*time.Second, logger)
 		if err != nil {
 			logger.Error("failed to connect to database", "err", err)
 			os.Exit(1)
@@ -58,13 +61,23 @@ func main() {
 		}
 	}
 
+	downstreamService := service.NewService(db)
+
 	mux := http.NewServeMux()
 	healthHandler := handler.NewHealthHandler(cfg.ServiceName, signKey, registry)
+	downstreamHandler := handler.NewDownstreamHandler(cfg.ServiceName, signKey, registry, downstreamService)
 
+	// Liveness
 	mux.HandleFunc("GET /livez", healthHandler.Livez)
 
+	// JWE Auth
 	jweAuth := jwe.Middleware(cfg.ServiceName, encKey, registry, replay)
 	mux.Handle("POST /health", jweAuth(http.HandlerFunc(healthHandler.Health)))
+
+	// Protected JWE Endpoints for Orchestrator calls
+	mux.Handle("POST /recharge", jweAuth(http.HandlerFunc(downstreamHandler.Recharge)))
+	mux.Handle("POST /cashback", jweAuth(http.HandlerFunc(downstreamHandler.Cashback)))
+	mux.Handle("POST /subscribe", jweAuth(http.HandlerFunc(downstreamHandler.Subscribe)))
 
 	addr := fmt.Sprintf(":%s", cfg.Port)
 	server := &http.Server{

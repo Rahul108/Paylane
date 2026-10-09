@@ -117,6 +117,18 @@ func (s *PaymentService) InitiatePayment(ctx context.Context, req InitiatePaymen
 
 	// 3. Provider flow
 	if req.TokenReference != "" {
+		// Enforce token binding exists and belongs to customer
+		var bindingStatus string
+		checkQuery := `SELECT status FROM bindings WHERE customer_id = ? AND token_reference = ? AND status = 'BOUND' LIMIT 1`
+		chkErr := s.db.QueryRowContext(ctx, checkQuery, req.CustomerID, req.TokenReference).Scan(&bindingStatus)
+		if chkErr != nil || bindingStatus != "BOUND" {
+			failReason := "REJECTED_UNBOUND_OR_FOREIGN_TOKEN"
+			_ = statemachine.Transition(ctx, s.db, paymentID, model.StatusFailed, failReason, &statemachine.TransitionOptions{
+				FailureReason: &failReason,
+			})
+			return nil, fmt.Errorf("%w: unbound or foreign token reference", ErrInvalidRequest)
+		}
+
 		// UI-less payment using bound token
 		chgResp, err := adp.Charge(ctx, adapter.ChargeRequest{
 			PaymentID:      paymentID,

@@ -34,6 +34,9 @@ echo "==> 3. Running JWE service mesh handshake test..."
 echo "==> 4. Running Phase 3 End-to-End Payment Flow (MFS + Card)..."
 (cd "${ROOT_DIR}/scripts/e2e_payment" && KEYS_DIR="${ROOT_DIR}/keys" go run .)
 
+echo "==> 5. Running Phase 4 & Phase 5 End-to-End Flow (Bindings, UI-less, Saga Journeys & Needs Attention)..."
+(cd "${ROOT_DIR}/scripts/e2e_saga" && KEYS_DIR="${ROOT_DIR}/keys" go run .)
+
 echo "=========================================================="
 echo "          🎉 ALL E2E VERIFICATION CHECKS PASSED!         "
 echo "=========================================================="
